@@ -1,6 +1,6 @@
-const fetch = require('node-fetch');
 const express = require('express');
 const cors = require('cors');
+const { Readable } = require('stream'); // Nécessaire pour le fix du streaming
 
 const app = express();
 app.use(cors());
@@ -17,6 +17,8 @@ app.all('/*', async (req, res) => {
   if (req.method === 'GET' && req.originalUrl === '/') return;
 
   let path = req.originalUrl;
+  
+  // S'assure que le path commence par /v1
   if (!path.startsWith('/v1')) {
     path = '/v1' + path;
   }
@@ -38,6 +40,7 @@ app.all('/*', async (req, res) => {
   try {
     const isStream = req.body?.stream === true;
 
+    // Utilisation du fetch natif de Node.js (pas besoin de node-fetch)
     const response = await fetch(targetUrl, {
       method:  req.method,
       headers,
@@ -52,7 +55,10 @@ app.all('/*', async (req, res) => {
       res.setHeader('Content-Type',  'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection',    'keep-alive');
-      response.body.pipe(res);
+      
+      // FIX STREAMING : Conversion du Web Stream en Node Stream
+      Readable.fromWeb(response.body).pipe(res);
+      
     } else {
       const text = await response.text();
       console.log('[← RESPONSE]', text.slice(0, 500));
