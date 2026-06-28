@@ -2,21 +2,20 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-app.use(cors()); // autorise les requêtes depuis le navigateur (Janitor.ai)
+app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-// Remplace ces valeurs ou utilise des variables d'environnement (recommandé)
 const AGENT_ROUTER_BASE_URL = process.env.AGENT_ROUTER_BASE_URL || 'https://VOTRE-URL-AGENT-ROUTER.com';
 const API_KEY               = process.env.API_KEY               || 'VOTRE-CLE-API-ICI';
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Route de sanité (doit être avant le catch-all)
+// Route de sanité
 app.get('/', (req, res) => res.json({ status: 'Relay OK ✅' }));
 
-// Relaie toutes les routes : /v1/chat/completions ET /chat/completions
-app.all(['/*'], async (req, res) => {
-  if (req.method === 'GET' && req.originalUrl === '/') return; // laisse passer la route sanité
+// Catch-all : relaie tout vers Agent Router
+app.all('/*', async (req, res) => {
+  if (req.method === 'GET' && req.originalUrl === '/') return;
 
   // Normalise le chemin : ajoute /v1 si absent
   let path = req.originalUrl;
@@ -26,10 +25,15 @@ app.all(['/*'], async (req, res) => {
 
   const targetUrl = `${AGENT_ROUTER_BASE_URL}${path}`;
 
+  // ── LOG de la requête entrante ──────────────────────────────────────────────
+  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log(`[→ REQUEST] ${req.method} ${targetUrl}`);
+  console.log('[→ BODY]', JSON.stringify(req.body, null, 2));
+  // ───────────────────────────────────────────────────────────────────────────
+
   const headers = {
     'Content-Type':  'application/json',
     'Authorization': `Bearer ${API_KEY}`,
-    // On n'envoie PAS les headers d'origine → Agent Router ne sait pas que ça vient de Janitor.ai
   };
 
   try {
@@ -43,7 +47,8 @@ app.all(['/*'], async (req, res) => {
         : undefined,
     });
 
-    // Réponse en streaming (Server-Sent Events)
+    console.log(`[← STATUS] ${response.status}`);
+
     if (isStream) {
       res.setHeader('Content-Type',  'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -51,21 +56,27 @@ app.all(['/*'], async (req, res) => {
 
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
+      let firstChunk = true;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) { res.end(); break; }
-        res.write(decoder.decode(value, { stream: true }));
+        const chunk = decoder.decode(value, { stream: true });
+        if (firstChunk) {
+          console.log('[← FIRST CHUNK]', chunk.slice(0, 300)); // log les 300 premiers chars
+          firstChunk = false;
+        }
+        res.write(chunk);
       }
     } else {
-      // Réponse normale JSON
       const text = await response.text();
+      console.log('[← RESPONSE BODY]', text.slice(0, 500)); // log les 500 premiers chars
       res.status(response.status)
          .set('Content-Type', 'application/json')
          .send(text);
     }
   } catch (err) {
-    console.error('[Relay Error]', err.message);
+    console.error('[✖ ERROR]', err.message);
     res.status(500).json({ error: { message: err.message } });
   }
 });
