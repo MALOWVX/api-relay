@@ -11,9 +11,20 @@ const AGENT_ROUTER_BASE_URL = process.env.AGENT_ROUTER_BASE_URL || 'https://VOTR
 const API_KEY               = process.env.API_KEY               || 'VOTRE-CLE-API-ICI';
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Relaie toutes les routes /v1/...  (chat/completions, models, etc.)
-app.all('/v1*', async (req, res) => {
-  const targetUrl = `${AGENT_ROUTER_BASE_URL}${req.originalUrl}`;
+// Route de sanité (doit être avant le catch-all)
+app.get('/', (req, res) => res.json({ status: 'Relay OK ✅' }));
+
+// Relaie toutes les routes : /v1/chat/completions ET /chat/completions
+app.all(['/*'], async (req, res) => {
+  if (req.method === 'GET' && req.originalUrl === '/') return; // laisse passer la route sanité
+
+  // Normalise le chemin : ajoute /v1 si absent
+  let path = req.originalUrl;
+  if (!path.startsWith('/v1')) {
+    path = '/v1' + path;
+  }
+
+  const targetUrl = `${AGENT_ROUTER_BASE_URL}${path}`;
 
   const headers = {
     'Content-Type':  'application/json',
@@ -58,9 +69,6 @@ app.all('/v1*', async (req, res) => {
     res.status(500).json({ error: { message: err.message } });
   }
 });
-
-// Route de sanité pour vérifier que le relai tourne
-app.get('/', (req, res) => res.json({ status: 'Relay OK ✅' }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Relai actif sur le port ${PORT}`));
